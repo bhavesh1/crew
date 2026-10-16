@@ -1,0 +1,34 @@
+name: decision-log
+
+# Deterministic, no AI: records every closed agent PR on the pinned decision log issue.
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  log:
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'agent') && vars.DECISION_LOG_ISSUE != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          OWNER: ${{ github.repository_owner }}
+          LOG: ${{ vars.DECISION_LOG_ISSUE }}
+        run: |
+          outcome=$([ "$MERGED" = "true" ] && echo "merged" || echo "rejected")
+          reason=$(gh pr view "$PR" --repo "$REPO" --json comments \
+            --jq "[.comments[] | select(.author.login == \"$OWNER\")] | last | .body // \"no reason given\"" \
+            | head -c 500 | tr '\n' ' ')
+          rounds=$(gh pr view "$PR" --repo "$REPO" --json comments \
+            --jq '[.comments[] | select(.body | startswith("Review round"))] | length')
+          printf '**#%s** %s — **%s** · review rounds: %s\n\nReason: %s\n' \
+            "$PR" "$TITLE" "$outcome" "$rounds" "$reason" > body.md
+          gh issue comment "$LOG" --repo "$REPO" --body-file body.md
